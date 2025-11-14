@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# Data and artifacts
+data/raw/
+data/interim/
+data/processed/*.npz
+models/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs
+logs/
+
+
