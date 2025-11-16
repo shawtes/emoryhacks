@@ -1,19 +1,44 @@
 import { useState, useRef, useEffect } from 'react'
 
+export interface AudioReadyPayload {
+  blob: Blob
+  file: File
+  url: string
+  durationSeconds: number
+}
+
 interface AudioRecorderProps {
   onRecordingComplete: (audioFile: File) => void
   disabled?: boolean
+  autoSubmit?: boolean
+  showAnalyzeButton?: boolean
+  showPreview?: boolean
+  onAudioReady?: (payload: AudioReadyPayload) => void
+  onRecordingStateChange?: (state: 'idle' | 'recording') => void
+  onReset?: () => void
+  onError?: (error: Error | string) => void
 }
 
-export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRecorderProps) {
+export default function AudioRecorder({
+  onRecordingComplete,
+  disabled,
+  autoSubmit = true,
+  showAnalyzeButton = true,
+  showPreview = true,
+  onAudioReady,
+  onRecordingStateChange,
+  onReset,
+  onError,
+}: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+  const recordingTimeRef = useRef(0)
 
   useEffect(() => {
     return () => {
@@ -26,12 +51,18 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
     }
   }, [audioUrl])
 
+  const cleanupStream = (stream: MediaStream) => {
+    stream.getTracks().forEach(track => track.stop())
+  }
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
+      recordingTimeRef.current = 0
+      setRecordingTime(0)
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -41,28 +72,47 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        setAudioBlob(blob)
+        const fileName = `recording-${Date.now()}.webm`
+        const file = new File([blob], fileName, { type: 'audio/webm' })
         const url = URL.createObjectURL(blob)
-        setAudioUrl(url)
-        
-        // Convert to WAV format for API
-        convertToWav(blob)
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop())
+
+        setAudioBlob(blob)
+        setAudioUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev)
+          return url
+        })
+
+        const payload: AudioReadyPayload = {
+          blob,
+          file,
+          url,
+          durationSeconds: recordingTimeRef.current,
+        }
+
+        onAudioReady?.(payload)
+
+        if (autoSubmit) {
+          onRecordingComplete(file)
+        }
+
+        cleanupStream(stream)
+        onRecordingStateChange?.('idle')
       }
 
       mediaRecorder.start()
       setIsRecording(true)
-      setRecordingTime(0)
+      onRecordingStateChange?.('recording')
 
-      // Start timer
       timerRef.current = window.setInterval(() => {
-        setRecordingTime(prev => prev + 1)
+        setRecordingTime(prev => {
+          const next = prev + 1
+          recordingTimeRef.current = next
+          return next
+        })
       }, 1000)
     } catch (err) {
       console.error('Error accessing microphone:', err)
-      alert('Failed to access microphone. Please check permissions.')
+      onError?.(err instanceof Error ? err : new Error('Failed to access microphone'))
     }
   }
 
@@ -77,14 +127,6 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
     }
   }
 
-  const convertToWav = async (blob: Blob) => {
-    // For simplicity, we'll send the webm file directly
-    // The backend should handle conversion, or we can use a library like lamejs
-    // For hackathon purposes, we'll create a File object from the blob
-    const audioFile = new File([blob], 'recording.webm', { type: 'audio/webm' })
-    onRecordingComplete(audioFile)
-  }
-
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -93,9 +135,20 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
 
   const handleSubmit = () => {
     if (audioBlob) {
-      const audioFile = new File([audioBlob], 'recording.webm', { type: 'audio/webm' })
+      const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: 'audio/webm' })
       onRecordingComplete(audioFile)
     }
+  }
+
+  const handleReset = () => {
+    setAudioBlob(null)
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl)
+      setAudioUrl(null)
+    }
+    setRecordingTime(0)
+    recordingTimeRef.current = 0
+    onReset?.()
   }
 
   return (
@@ -125,29 +178,24 @@ export default function AudioRecorder({ onRecordingComplete, disabled }: AudioRe
         </div>
       )}
 
-      {audioBlob && !isRecording && (
+      {showPreview && audioBlob && !isRecording && (
         <div className="recording-preview">
           {audioUrl && (
             <audio controls src={audioUrl} className="audio-player" />
           )}
           <div className="preview-actions">
-            <button
-              className="submit-button btn-primary"
-              onClick={handleSubmit}
-              disabled={disabled}
-            >
-              Analyze Recording
-            </button>
+            {showAnalyzeButton && (
+              <button
+                className="submit-button btn-primary"
+                onClick={handleSubmit}
+                disabled={disabled}
+              >
+                Analyze Recording
+              </button>
+            )}
             <button
               className="reset-button btn-secondary"
-              onClick={() => {
-                setAudioBlob(null)
-                setAudioUrl(null)
-                setRecordingTime(0)
-                if (audioUrl) {
-                  URL.revokeObjectURL(audioUrl)
-                }
-              }}
+              onClick={handleReset}
             >
               Record Again
             </button>

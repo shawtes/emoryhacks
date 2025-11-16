@@ -1,21 +1,32 @@
 import { Navigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import PageLoader from './PageLoader'
+import type { Persona } from '../lib/firebase'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
+  requiredRole?: Persona
 }
 
-// TODO: Replace with actual authentication check
-// For now, this is a placeholder that always allows access
-// In production, check if user is authenticated
-export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  // const isAuthenticated = checkAuth() // TODO: Implement auth check
-  const isAuthenticated = true // Temporary: always allow for UI development
+export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+  const { user, persona, isAuthLoading } = useAuth()
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+  if (isAuthLoading) {
+    return <PageLoader />
+  }
+
+  if (!user) {
+    const redirectPath = requiredRole === 'patient' ? '/patient/login' : '/doctor/login'
+    return <Navigate to={redirectPath} replace />
+  }
+
+  if (requiredRole && persona && persona !== requiredRole) {
+    const fallback = persona === 'patient' ? '/patient/dashboard' : '/doctor/dashboard'
+    return <Navigate to={fallback} replace />
   }
 
   return <>{children}</>
 }
+
 
 

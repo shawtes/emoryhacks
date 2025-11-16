@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "seed:demo": "node scripts/seedDemoData.js"
+  },
+  "dependencies": {
+    "firebase": "^12.6.0",
+    "firebase-admin": "^12.7.0"
+  }
+}

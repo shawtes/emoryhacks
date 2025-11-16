@@ -1,0 +1,291 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import LiveStatusBadge from '../components/LiveStatusBadge'
+import useStaggeredReveal from '../hooks/useStaggeredReveal'
+import { useFirebase } from '../context/FirebaseContext'
+import { useAuth } from '../context/AuthContext'
+import AudioRecorder, { type AudioReadyPayload } from '../components/AudioRecorder'
+import { uploadPatientRecording } from '../services/audioUpload'
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
+import { getAssessmentScript } from '../content/audioScripts'
+import { getFirebaseApp } from '../lib/firebase'
+import { collection, doc, getFirestore, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
+import PageLoader from '../components/PageLoader'
+
+interface RecordingHistory {
+  id: string
+  recordedAt?: Date | null
+  notes?: string | null
+  analysisStatus?: string
+}
+
+interface PatientDocData {
+  displayName?: string
+  doctorId?: string
+  clinicId?: string
+}
+
+interface DoctorDocData {
+  profile?: {
+    fullName?: string
+    specialties?: string[]
+  }
+}
+
+interface ClinicDocData {
+  name?: string
+  phone?: string
+  contactEmail?: string
+}
+
+type UploadStage = 'idle' | 'recording' | 'uploading' | 'saving' | 'success' | 'error'
+
+export default function PatientAssessment() {
+  const { selectPersona } = useFirebase()
+  const { user, persona, claims } = useAuth()
+  const [patientDoc, setPatientDoc] = useState<PatientDocData | null>(null)
+  const [doctorDoc, setDoctorDoc] = useState<DoctorDocData | null>(null)
+  const [clinicDoc, setClinicDoc] = useState<ClinicDocData | null>(null)
+  const [recordings, setRecordings] = useState<RecordingHistory[]>([])
+  const [audioPreview, setAudioPreview] = useState<AudioReadyPayload | null>(null)
+  const [notesInput, setNotesInput] = useState('')
+  const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
+  const [uploadStatusMessage, setUploadStatusMessage] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [lastRecordingId, setLastRecordingId] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const patientIdClaim = (claims?.patientId as string) ?? null
+  const script = getAssessmentScript('en-US')
+
+  useStaggeredReveal()
+
+  useEffect(() => {
+    if (persona !== 'patient') {
+      void selectPersona('patient')
+    }
+  }, [persona, selectPersona])
+
+  useEffect(() => {
+    if (!patientIdClaim || persona !== 'patient') {
+      return
+    }
+    const db = getFirestore(getFirebaseApp('patient'))
+    const patientRef = doc(db, 'patients', patientIdClaim)
+    const unsubscribe = onSnapshot(patientRef, (snap) => {
+      setPatientDoc(snap.exists() ? (snap.data() as PatientDocData) : null)
+    })
+    return () => unsubscribe()
+  }, [patientIdClaim, persona])
+
+  useEffect(() => {
+    if (!patientDoc) {
+      return
+    }
+    const db = getFirestore(getFirebaseApp('patient'))
+    const doctorId = patientDoc.doctorId as string | undefined
+    const clinicId = patientDoc.clinicId as string | undefined
+
+    let unsubDoctor: (() => void) | undefined
+    let unsubClinic: (() => void) | undefined
+
+    if (doctorId) {
+      const doctorRef = doc(db, 'doctors', doctorId)
+      unsubDoctor = onSnapshot(doctorRef, (snap) => setDoctorDoc(snap.exists() ? (snap.data() as DoctorDocData) : null))
+    } else {
+      setDoctorDoc(null)
+    }
+
+    if (clinicId) {
+      const clinicRef = doc(db, 'clinics', clinicId)
+      unsubClinic = onSnapshot(
+        clinicRef,
+        (snap) => setClinicDoc(snap.exists() ? (snap.data() as ClinicDocData) : null),
+      )
+    } else {
+      setClinicDoc(null)
+    }
+
+    return () => {
+      unsubDoctor?.()
+      unsubClinic?.()
+    }
+  }, [patientDoc])
+
+  useEffect(() => {
+    if (!patientIdClaim || persona !== 'patient') {
+      return
+    }
+    const db = getFirestore(getFirebaseApp('patient'))
+    const recordingsRef = collection(db, 'patientAudio', patientIdClaim, 'recordings')
+    const recordingsQuery = query(recordingsRef, orderBy('recordedAt', 'desc'), limit(5))
+    const unsubscribe = onSnapshot(recordingsQuery, (snapshot) => {
+      const mapped = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data()
+        return {
+          id: docSnap.id,
+          recordedAt: data.recordedAt?.toDate?.() ?? null,
+          notes: data.notes ?? null,
+          analysisStatus: data.analysisStatus ?? 'pending',
+        }
+      })
+      setRecordings(mapped)
+    })
+    return () => unsubscribe()
+  }, [patientIdClaim, persona])
+
+  const handleRecorderReady = (payload: AudioReadyPayload) => {
+    setAudioPreview(payload)
+    setUploadStage('recording')
+    setUploadStatusMessage(null)
+    setUploadError(null)
+  }
+
+  const handleUpload = async () => {
+    if (!audioPreview) {
+      setUploadError('Please record audio before submitting.')
+      return
+    }
+    setUploadStage('uploading')
+    setUploadProgress(0)
+    setUploadStatusMessage('Uploading audio to Firebase…')
+    setUploadError(null)
+    try {
+      const recordingId = await uploadPatientRecording({
+        file: audioPreview.file,
+        patientId: patientIdClaim,
+        doctorId: patientDoc?.doctorId ?? null,
+        notes: notesInput || null,
+        durationSeconds: audioPreview.durationSeconds,
+        onProgress: (percentage) => setUploadProgress(percentage),
+      })
+      setLastRecordingId(recordingId)
+      setUploadStage('success')
+      setUploadStatusMessage('Submitted successfully to Firebase and shared with your doctor.')
+      setNotesInput('')
+    } catch (error) {
+      setUploadStage('error')
+      const message = getFirebaseErrorMessage(error)
+      setUploadError(`Not submitted. ${message}`)
+      setUploadStatusMessage('There was a problem submitting to Firebase.')
+    } finally {
+      setUploadProgress(null)
+      setTimeout(() => {
+        setUploadStage('idle')
+        setAudioPreview(null)
+        setUploadStatusMessage(null)
+        setUploadError(null)
+      }, 4000)
+    }
+  }
+
+  if (!user || persona !== 'patient') {
+    return <PageLoader />
+  }
+
+  return (
+    <div className="patient-assessment">
+      <header className="patient-dashboard__hero" data-animate>
+        <div className="patient-dashboard__hero-copy">
+          <p className="eyebrow">
+            {clinicDoc?.name ? `Connected to ${clinicDoc.name}` : 'Patient assessment'}
+          </p>
+          <h1>Guided voice assessment</h1>
+          <p>Follow the script, record your voice, and submit the audio directly to your care team.</p>
+          <p className="patient-info-note">
+            Assigned doctor: {doctorDoc?.profile?.fullName ?? 'Pending assignment'}
+          </p>
+          <LiveStatusBadge />
+        </div>
+        <div className="patient-dashboard__hero-actions">
+          <Link to="/patient/dashboard" className="btn-nav-secondary">
+            ← Back to dashboard
+          </Link>
+        </div>
+      </header>
+
+      <section className="guided-script-card" data-animate>
+        <div className="script-card-eyebrow">Suggested script</div>
+        <ul className="script-list">
+          {script.segments.slice(0, 5).map((segment) => (
+            <li key={segment.id}>{segment.text}</li>
+          ))}
+        </ul>
+        <p className="script-hint">
+          Speak clearly for about a minute. You can re-record if you need to. Your doctor receives every submission.
+        </p>
+      </section>
+
+      <section className="guided-controls-card" data-animate>
+        <div className="script-card-eyebrow">Recorder</div>
+        <AudioRecorder
+          onRecordingComplete={() => undefined}
+          onAudioReady={handleRecorderReady}
+          showAnalyzeButton={false}
+          autoSubmit={false}
+        />
+        {audioPreview && (
+          <div className="audio-review-card">
+            <div className="audio-review-head">
+              <strong>Preview</strong>
+              <span>{audioPreview.durationSeconds ?? 0}s</span>
+            </div>
+            <audio controls src={audioPreview.url} className="audio-player" />
+            <label className="form-field">
+              <span>Notes for your doctor (optional)</span>
+              <textarea
+                rows={3}
+                value={notesInput}
+                onChange={(event) => setNotesInput(event.target.value)}
+                placeholder="Describe how you felt during this recording…"
+              />
+            </label>
+            <button className="btn-primary" onClick={handleUpload}>
+              {uploadStage === 'uploading' || uploadStage === 'saving' ? 'Submitting…' : 'Submit to clinic'}
+            </button>
+          </div>
+        )}
+        {uploadStatusMessage && <p className="status-pill success">{uploadStatusMessage}</p>}
+        {uploadStage === 'uploading' && uploadProgress !== null && (
+          <progress value={uploadProgress} max={100}>
+            {uploadProgress}%
+          </progress>
+        )}
+        {uploadError && <p className="status-pill danger">{uploadError}</p>}
+        {lastRecordingId && (
+          <p className="upload-details">
+            Recording ID: <strong>{lastRecordingId}</strong>
+          </p>
+        )}
+      </section>
+
+      <section className="patient-dashboard__panel" data-animate>
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Recent uploads</p>
+            <h2>Your last recordings</h2>
+          </div>
+        </div>
+        {recordings.length === 0 ? (
+          <p>You haven’t uploaded any audio yet. Record above to send your first submission.</p>
+        ) : (
+          <ul className="clinic-message-list">
+            {recordings.map((recording) => (
+              <li key={recording.id} className="clinic-message">
+                <div>
+                  <p className="clinic-message-sender">
+                    {recording.recordedAt ? recording.recordedAt.toLocaleString() : 'Unknown time'}
+                  </p>
+                  <p className="clinic-message-snippet">
+                    {recording.notes ? recording.notes : 'No notes provided.'}
+                  </p>
+                </div>
+                <span className="status-pill">{recording.analysisStatus ?? 'pending'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+

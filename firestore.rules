@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isDoctor() {
+      return request.auth != null && request.auth.token.role == 'doctor';
+    }
+
+    function isPatient(patientId) {
+      return request.auth != null &&
+        request.auth.token.role == 'patient' &&
+        request.auth.token.patientId == patientId;
+    }
+
+    match /clinics/{clinicId} {
+      allow read: if request.auth != null;
+      allow write: if false; // managed via admin tooling only
+    }
+
+    match /doctors/{doctorId} {
+      allow read: if request.auth != null;
+      allow create, update: if isDoctor() && request.resource.data.clinicId == resource.data.clinicId;
+      allow delete: if false;
+    }
+
+    match /patients/{patientId} {
+      allow read: if isDoctor() ||
+        (isPatient(patientId));
+
+      allow create, update: if isDoctor();
+      allow delete: if false;
+    }
+
+    match /patientAudio/{patientId}/recordings/{recordingId} {
+      allow read: if isDoctor() || isPatient(patientId);
+      allow create: if isPatient(patientId);
+      allow update: if isDoctor() || isPatient(patientId);
+      allow delete: if false;
+    }
+
+    match /patientDoctorHistory/{patientId}/changes/{changeId} {
+      allow read: if isDoctor();
+      allow write: if isDoctor();
+    }
+  }
+}
+
