@@ -4,8 +4,10 @@
 cd "$(dirname "$0")/emoryhacks"
 
 # Activate virtual environment if it exists
-if [ -d "../venv" ]; then
-    source ../venv/bin/activate
+if [ -d "../.venv311" ]; then
+    source ../.venv311/bin/activate
+elif [ -d "../.venv" ]; then
+    source ../.venv/bin/activate
 elif [ -d "venv" ]; then
     source venv/bin/activate
 fi
