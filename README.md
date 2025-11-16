@@ -82,8 +82,8 @@ python comprehensive_analysis.py
 │                        CLIENT LAYER                          │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  React/TypeScript Frontend (Port 3000)               │   │
-│  │  • Audio Recording (Microphone)                      │   │
-│  │  • File Upload (Drag & Drop)                          │   │
+│  │  • MP3 File Upload (Drag & Drop)                     │   │
+│  │  • Analysis Results Display                          │   │
 │  │  • Results Display                                    │   │
 │  └──────────────────────────────────────────────────────┘   │
 └───────────────────────┬─────────────────────────────────────┘
@@ -144,9 +144,9 @@ Audio Input (WAV/MP3/WebM)
 - **Entry Point**: `webapp/src/main.tsx`
 - **Main App**: `webapp/src/App.tsx` - Orchestrates components
 - **Components**:
-  - `AudioRecorder` - Browser microphone recording
-  - `FileUploader` - Drag & drop file upload
+  - `FileUploader` - Drag & drop MP3/WAV upload (MP3 preferred)
   - `ResultsDisplay` - Prediction results visualization
+  - `TechStack` - In-app tech page with visuals and report summary
 - **State Management**: React hooks (useState)
 - **API Communication**: Fetch API
 
@@ -321,7 +321,9 @@ python -m venv venv
 venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Mac/Linux
 pip install -r requirements.txt
-python -m uvicorn api.main:app --reload
+# Ensure FFmpeg is installed (for WebM/MP3 decoding via PyAV/librosa)
+# Start API on port 8001
+python -m uvicorn emoryhacks.api.main:app --reload --port 8001 --host 0.0.0.0
 ```
 
 **Frontend (new terminal):**
@@ -371,6 +373,21 @@ Upload audio file for analysis.
 }
 ```
 
+### `POST /predict-url`
+Download and analyze audio from a URL (e.g., Firebase Storage download URL).
+
+Request:
+- Method: `POST`
+- Content-Type: `application/json`
+- Body: `{ "url": "https://..." }`
+
+Example:
+```bash
+curl -X POST http://localhost:8001/predict-url \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://storage.googleapis.com/.../your.mp3?token=...\"}"
+```
+
 ### `GET /health`
 Health check endpoint.
 
@@ -402,10 +419,16 @@ API information.
 curl -X POST http://localhost:8001/predict \
   -F "file=@path/to/audio.wav"
 ```
+Or with a download URL:
+```bash
+curl -X POST http://localhost:8001/predict-url \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"https://.../your.mp3?token=...\"}"
+```
 
 ### Test Frontend
 1. Open `http://localhost:3000`
-2. Record audio or upload file
+2. Upload MP3 (preferred) or WAV file
 3. Click "Analyze" to see predictions
 
 ---
@@ -456,9 +479,8 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 ## 📊 Key Features
 
 ✅ **Audio Input**
-- Browser microphone recording
-- File upload (drag & drop)
-- Multiple audio formats supported
+- MP3/WAV file upload (drag & drop; MP3 preferred)
+- Multiple audio formats supported (MP3, WAV; WebM decoded server-side)
 
 ✅ **ML Pipeline**
 - Preprocessing (denoising, normalization)
@@ -491,9 +513,9 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 ## 🐛 Troubleshooting
 
 ### Backend Issues
-- **Port 8000 in use**: Change port with `--port 8001`
+- **Port in use**: Change port with `--port 8001`
 - **Model not found**: Place models in `emoryhacks/models/`
-- **Audio errors**: Check file format (WAV/MP3 supported)
+- **Audio errors**: Ensure FFmpeg installed; check file format (MP3/WAV supported)
 
 ### Frontend Issues
 - **API connection**: Check `VITE_API_URL` environment variable
@@ -508,6 +530,12 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Detailed AWS deployment
 - [README_DEPLOYMENT.md](./README_DEPLOYMENT.md) - Deployment overview
 - [webapp/README.md](./webapp/README.md) - Frontend-specific docs
+
+### Reports and Visualizations (browse in repo or via the app Tech page)
+- Metrics JSON: `reports/metrics/ensemble/ensemble_cv_metrics.json`, `reports/metrics/rf/rf_cv_metrics.json`
+- Visuals: `reports/visualizations/enhanced_gb_analysis.png`, `reports/visualizations/feature_category_analysis.png`
+- Technical report: `reports/technical_report.md`
+  - Also mirrored for the frontend at: `webapp/public/reports/...` so the Tech page can render them
 
 ---
 
