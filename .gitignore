@@ -10,10 +10,21 @@ venv/
 .pytest_cache/
 
 # Data and artifacts
+data/
+*.csv
+*.wav
+*.mp3
+*.flac
+*.m4a
 data/raw/
 data/interim/
-data/processed/*.npz
+data/processed/
 models/
+*.joblib
+*.pkl
+*.pickle
+*.pth
+checkpoints/
 
 # Notebooks
 .ipynb_checkpoints/

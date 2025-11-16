@@ -33,10 +33,17 @@ def build_base_estimators(random_state: int = 42) -> Dict[str, Any]:
     gbc = GradientBoostingClassifier(
         n_estimators=300, learning_rate=0.05, max_depth=3, random_state=random_state
     )
+    # Improved logistic regression with better convergence parameters
     lr = Pipeline(
         [
             ("scaler", StandardScaler(with_mean=True, with_std=True)),
-            ("lr", LogisticRegression(max_iter=2000, solver="lbfgs", C=1.0, random_state=random_state)),
+            ("lr", LogisticRegression(
+                max_iter=5000,  # Increased iterations
+                solver="liblinear",  # Better solver for convergence
+                C=0.1,  # Stronger regularization
+                random_state=random_state,
+                class_weight='balanced'  # Handle class imbalance
+            )),
         ]
     )
     return {"rf": rf, "svc": svc, "gbc": gbc, "lr": lr}
