@@ -17,6 +17,12 @@ build/
 # Node modules (if any)
 **/node_modules/**
 
+# Environment files
+.env
+.env.local
+webapp/.env
+webapp/.env.local
+
 # OS
 .DS_Store
 

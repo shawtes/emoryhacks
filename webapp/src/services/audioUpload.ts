@@ -43,6 +43,11 @@ const uploadFileToFirebaseStorage = (
     )
   })
 
+export interface UploadPatientRecordingResult {
+  recordingId: string
+  storagePath: string
+}
+
 export const uploadPatientRecording = async ({
   file,
   patientId,
@@ -50,7 +55,7 @@ export const uploadPatientRecording = async ({
   notes,
   durationSeconds,
   onProgress,
-}: UploadPatientRecordingOptions) => {
+}: UploadPatientRecordingOptions): Promise<UploadPatientRecordingResult> => {
   const issuePayload: IssueUploadTokenPayload = {
     mimeType: file.type,
   }
@@ -80,6 +85,9 @@ export const uploadPatientRecording = async ({
     metadata,
   })
 
-  return tokenResponse.recordingId
+  return {
+    recordingId: tokenResponse.recordingId,
+    storagePath: tokenResponse.storagePath,
+  }
 }
 

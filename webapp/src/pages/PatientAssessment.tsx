@@ -5,11 +5,15 @@ import useStaggeredReveal from '../hooks/useStaggeredReveal'
 import { useFirebase } from '../context/FirebaseContext'
 import { useAuth } from '../context/AuthContext'
 import AudioRecorder, { type AudioReadyPayload } from '../components/AudioRecorder'
-import { uploadPatientRecording } from '../services/audioUpload'
+import { uploadPatientRecording, type UploadPatientRecordingResult } from '../services/audioUpload'
 import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import { getAssessmentScript } from '../content/audioScripts'
 import { getFirebaseApp } from '../lib/firebase'
 import { collection, doc, getFirestore, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { getStorage, ref, getDownloadURL } from 'firebase/storage'
+import ResultsDisplay from '../components/ResultsDisplay'
+import type { PredictionResult } from '../types'
+import { predictByUrl } from '../services/api'
 import PageLoader from '../components/PageLoader'
 
 interface RecordingHistory {
@@ -54,6 +58,8 @@ export default function PatientAssessment() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [lastRecordingId, setLastRecordingId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [predictionResult, setPredictionResult] = useState<PredictionResult | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
   const patientIdClaim = (claims?.patientId as string) ?? null
   const script = getAssessmentScript('en-US')
 
@@ -145,12 +151,13 @@ export default function PatientAssessment() {
       setUploadError('Please record audio before submitting.')
       return
     }
+    setPredictionResult(null)
     setUploadStage('uploading')
     setUploadProgress(0)
     setUploadStatusMessage('Uploading audio to Firebase…')
     setUploadError(null)
     try {
-      const recordingId = await uploadPatientRecording({
+      const res: UploadPatientRecordingResult = await uploadPatientRecording({
         file: audioPreview.file,
         patientId: patientIdClaim,
         doctorId: patientDoc?.doctorId ?? null,
@@ -158,10 +165,19 @@ export default function PatientAssessment() {
         durationSeconds: audioPreview.durationSeconds,
         onProgress: (percentage) => setUploadProgress(percentage),
       })
-      setLastRecordingId(recordingId)
+      setLastRecordingId(res.recordingId)
       setUploadStage('success')
       setUploadStatusMessage('Submitted successfully to Firebase and shared with your doctor.')
       setNotesInput('')
+
+      // Analyze via backend using Firebase download URL
+      setAnalyzing(true)
+      const storage = getStorage(getFirebaseApp('patient'))
+      const url = await getDownloadURL(ref(storage, res.storagePath))
+      const result = await predictByUrl(url)
+      setPredictionResult(result)
+      setAnalyzing(false)
+      setUploadStatusMessage('Analysis complete.')
     } catch (error) {
       setUploadStage('error')
       const message = getFirebaseErrorMessage(error)
@@ -169,12 +185,7 @@ export default function PatientAssessment() {
       setUploadStatusMessage('There was a problem submitting to Firebase.')
     } finally {
       setUploadProgress(null)
-      setTimeout(() => {
-        setUploadStage('idle')
-        setAudioPreview(null)
-        setUploadStatusMessage(null)
-        setUploadError(null)
-      }, 4000)
+      // Keep preview and messages visible so user can see results
     }
   }
 
@@ -242,6 +253,12 @@ export default function PatientAssessment() {
             <button className="btn-primary" onClick={handleUpload}>
               {uploadStage === 'uploading' || uploadStage === 'saving' ? 'Submitting…' : 'Submit to clinic'}
             </button>
+            {analyzing && <p className="status-pill info" style={{ marginTop: '0.5rem' }}>Analyzing…</p>}
+            {predictionResult && (
+              <div style={{ marginTop: '1rem' }}>
+                <ResultsDisplay result={predictionResult} />
+              </div>
+            )}
           </div>
         )}
         {uploadStatusMessage && <p className="status-pill success">{uploadStatusMessage}</p>}
