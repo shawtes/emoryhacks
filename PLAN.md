@@ -1,139 +1,65 @@
-## Project plan: Speech-based dementia/Alzheimer’s detection in Python
+# Webapp Performance Optimization Plan
 
-### Goal
-- Build a research-grade pipeline that ingests voice recordings and predicts dementia status (screening, not diagnosis). Emphasize early screening, subject-wise evaluation, and reproducibility. Align with findings from “Dementia Detection from Speech Using ML and DL Architectures” (Sensors, 2022).
+## Objectives
+- Improve initial render and interactive readiness for existing pages (especially `Home.tsx`) without altering layout or visual structure.
+- Cut the largest JS bundle size by ≥30 % and deliver LCP ≤2.5 s on mid-tier devices.
+- Preserve accessibility and existing UX flows while reducing CPU, memory, and network cost.
 
-### Data and ethics
-- Dataset: DementiaBank Pitt Corpus (Cookie Theft) [request access via](https://dementia.talkbank.org/).
-- Labels: dementia vs healthy control (HC). If available, capture MCI/AD subtypes for future work.
-- Ethics: research-only; not a medical device. Obtain IRB/consent if adding new data. Remove PII from filenames/metadata.
-- Splits: strictly subject-wise to prevent leakage (no segments from the same subject across train/val/test).
+## KPIs & Monitoring
+- Lighthouse Performance ≥90 (mobile + desktop), CLS <0.1, TBT <200 ms.
+- Real-user metrics via `web-vitals` (LCP, FID/INP, CLS) streamed to analytics.
+- Bundle analyzer report committed per release; WebPageTest synthetic run for `/`, `/auth/*`, `/patient/dashboard`.
 
-### Repository structure
-```
-demntia mlin/
-  data/
-    raw/                 # original audio (.wav/.mp3) (read-only)
-    interim/             # cleaned/denoised, diarized
-    processed/           # feature arrays, frame-level tensors, labels
-    splits/              # json/csv of subject-wise folds
-  models/
-    ml/                  # RF/SVM artifacts (sklearn joblib)
-    dl/                  # CNN/RNN/PRCNN checkpoints (tf/torch)
-  reports/
-    figures/             # confusion matrices, ROC, PR curves
-    metrics/             # per-fold results, bootstrapped CIs
-  src/
-    config/              # YAML/OMEGACONF params
-    data_ingest.py
-    preprocess.py        # VAD, diarization, denoise, normalize, resample
-    segment.py           # silence truncation, fixed-length chunks
-    features.py          # MFCC/GTCC/delta, F0, formants, jitter, shimmer
-    features_agg.py      # aggregates for ML track
-    ml_train.py          # RF, SVM, trees (+search)
-    dl_models.py         # CNN, (Bi-)GRU/LSTM, PRCNN
-    dl_train.py
-    evaluate.py          # metrics, plots, calibration, SHAP
-    api.py               # FastAPI inference service
-  notebooks/
-    EDA_*.ipynb
-    ErrorAnalysis_*.ipynb
-  README.md
-  requirements.txt or environment.yml
-```
+## Constraints
+- No layout, content, or navigation changes; performance-only modifications.
+- Prefer native browser capabilities and existing stack (React + Vite/Next? adjust per repo) before adding libraries.
+- Every optimization must include a measurable before/after metric.
 
-### Environment
-- Python 3.10+
-- Core libs: numpy, scipy, pandas, scikit-learn, joblib, matplotlib, seaborn
-- Audio: librosa, soundfile, pydub, webrtcvad (or pyannote.audio for diarization), noisereduce
-- Voice features: parselmouth (Praat) for jitter/shimmer/formants/F0
-- DL: tensorflow or pytorch (choose one; paper used TF-Keras with Nadam)
-- Config & utils: pyyaml/omegaconf, hydra-core, shap (interpretability)
+## Workstreams
 
-### End-to-end pipeline
-1) Ingestion
-   - Validate formats; convert to 16-bit mono PCM WAV.
-   - Keep original sample rate. Paper used 44.1 kHz; alternatively standardize to 16 kHz (pick one and stay consistent in all stages; document choice).
-2) Preprocessing
-   - Remove interviewer voice: preferred diarization (pyannote.audio); fallback: manual regions/transcript alignment or energy-based heuristics.
-   - Noise reduction: spectral gating (noisereduce) targeted to background noise.
-   - Amplitude normalization to a consistent loudness target.
-3) Silence handling and segmentation (DL track)
-   - Compress long silences >0.75 s down to 0.75 s.
-   - Segment into fixed 15 s windows (with small overlap optional), save segment metadata.
-4) Feature extraction
-   - Frame window/hop: 25 ms / 10–12 ms.
-   - Frame-level features (62 dims per paper):
-     - MFCC (14), ΔMFCC (14)
-     - GTCC (14), ΔGTCC (14)
-     - Log-energy (1)
-     - Formants F1–F4 (4)
-     - Fundamental frequency F0 (1)
-   - Time-(in)dependent features (for ML track; ~44 dims):
-     - Jitter (5 variants), Shimmer (5 variants), F0, Formants (4), MFCC/GTCC aggregates.
-   - Aggregations for ML: mean, std, median, IQR, percentiles as needed → compact 44-D set (match paper).
-5) Splitting
-   - Five-fold stratified cross-validation, subject-wise. Ensure segments from one subject stay in a single fold.
+### 1. Bundle Health & Code Splitting
+- Run `pnpm build --report` (or `npm run analyze`) to inventory chunk sizes; flag anything >200 KB gz.
+- Split `Home.tsx` into route-level async chunks (hero, storyline, showcase) using React.lazy + Suspense; keep fold-critical logic synchronous.
+- Eliminate unused polyfills, shared utils, and third-party packages; prefer platform APIs.
+- Promote component-level memoization (`React.memo`, `useMemo`) for static props; ensure hooks dependencies are memo-safe to avoid re-renders.
+- Enable modern build output (ESM, differential serving) so evergreen browsers skip legacy transforms.
 
-### Modeling
-ML track (compact, strong baseline; paper best ≈87.6% accuracy with RF)
-- Features: 44-D aggregated set (prosodic/voice quality + cepstral).
-- Models: RandomForest (primary), SVM (RBF), REP tree, RandomTree, Logistic baseline.
-- Search: cross-validated grid/random search for RF (n_estimators, max_depth, min_samples_*), SVM (C, gamma).
-- Calibration: Platt/Isotonic if probabilities used.
+### 2. Asset & Font Optimization
+- Convert hero/section imagery to AVIF/WebP derivatives with responsive `<picture>` tags; keep legacy fallback.
+- Introduce blur-up or solid-color placeholders for large assets; lazy-load anything below first viewport.
+- Inline critical CSS and preload the primary font subset; defer remaining font weights, set `font-display: swap`.
+- Audit SVGs used in `Home.tsx` and shared components; collapse inline duplicates and minify paths.
 
-DL track (target ≈85% with PRCNN per paper)
-- Inputs: T×62 (frame-level).
-- CNN-1D: 3–4 conv blocks (filters: 32→64→128; kernels: 32/18/12), max-pool, dropout 0.3; dense head; Sigmoid output.
-- RNN: (Bi-)GRU/LSTM (2×128 units), time-distributed dense (64→32→16→8), flatten, dense head.
-- PRCNN: parallel CNN branch + RNN branch, concatenate, dropout 0.5, dense head.
-- Training: Nadam, lr = 1e-4, batch size 16–64, early stopping on val F1 (patience 10), class weighting if needed.
+### 3. Network & Caching Strategy
+- Ensure CDN caching headers for static assets (immutable hash + 1y TTL); enable brotli + HTTP/2.
+- Implement service worker (or extend existing PWA layer) for offline cache of shell + fonts and `stale-while-revalidate` for API responses.
+- Add `<link rel="preconnect">` for API + analytics origins; selectively `<link rel="prefetch">` route bundles when hovering nav items.
+- Review API payloads for `Home.tsx` data (testimonials, stats) and introduce compression or trimming of unused fields.
 
-### Evaluation
-- Metrics: accuracy, precision, recall (sensitivity), F1; emphasize recall on dementia class. Report confusion matrices, ROC-AUC/PR-AUC.
-- Cross-validation: report per-fold and mean±std; bootstrap CIs over subjects.
-- Leakage guard: verify no subject/segment leakage across folds.
-- Model selection: prefer higher dementia recall with strong F1, then operational considerations (size/speed).
+### 4. Runtime Efficiency
+- Replace synchronous data massaging in render with memoized selectors; move heavy transforms to build-time JSON.
+- Virtualize long lists (e.g., testimonials, blog feeds) or limit DOM nodes via pagination.
+- Debounce scroll/resize listeners; prefer `IntersectionObserver` for in-view checks.
+- Audit context providers and prop drilling; split contexts or use selectors so updates don’t cascade through entire trees.
 
-### Interpretability and analysis
-- ML: permutation importance, SHAP summary and dependence plots (feature-level insights).
-- DL: Grad-CAM-like saliency on feature maps (optional), ablations per feature group (prosodic vs cepstral).
-- Error analysis: stratify by recording length, SNR, speaker age/sex (if available), and silence proportion.
+### 5. Data Fetching & State
+- Adopt SWR/React Query (if not already) with caching, background refresh, and de-duped requests; otherwise implement lightweight cache hook.
+- Coalesce parallel fetches for hero stats/trust badges via single batched endpoint.
+- Ensure SSR/SSG pages serialize only what is needed; hydrate deferred data via `useEffect` to keep HTML lean.
 
-### Inference and deployment (research)
-- FastAPI microservice:
-  - POST /predict accepts .wav or base64; runs preprocess → features → model.
-  - Returns probability, class, and confidence; include research-only disclaimer.
-- Batch CLI for offline scoring and auditing.
-- On-device feasibility: export light RF model or quantized DL (future work).
-- Privacy: process locally; avoid cloud storage; purge intermediates; log only non-PII aggregates.
+### 6. Testing & Guardrails
+- Add Lighthouse CI + Bundlewatch to PR pipeline; fail builds when thresholds regress.
+- Track Web Vitals in production (Azul, Sentry, or custom endpoint) with alerts for percentile regressions.
+- Document performance budgets per page (JS <170 KB gz, images <300 KB above the fold).
 
-### Reproducibility
-- Deterministic seeds; save versions of data splits and configs.
-- Track artifacts: models, metrics, and code hash. Consider MLflow or Weights & Biases.
+## Phased Rollout
+1. **Audit & Instrumentation** – Capture current metrics, wire Lighthouse CI, land bundle analyzer tooling.
+2. **Quick Wins** – Fonts, image compression, unused dependency removal, caching headers.
+3. **Structural Optimizations** – Code splitting, lazy-loading, runtime memoization, API payload trimming.
+4. **Hardening & Monitoring** – Add tests, regression alerts, and schedule monthly performance reviews.
 
-### Risks and mitigations
-- Small dataset: use subject-wise CV, confidence intervals, simpler ML models; avoid overfitting.
-- Speaker diarization quality: verify with spot checks; maintain fallback energy-based removal.
-- Domain shift (mic, room noise): augmentations (noise, reverb), robust normalization.
-- Medical use risk: clearly label as research tool; not for clinical diagnosis.
-
-### Milestones
-- Week 1: Environment, repo scaffold, data access, subject-wise splits.
-- Week 2: Preprocessing (VAD/diarization, denoise, normalization), feature extractors validated.
-- Week 3: ML baselines (RF/SVM), CV results + report, interpretability.
-- Week 4: DL models (CNN/RNN/PRCNN), CV results, compare to ML.
-- Week 5: API/CLI, documentation, packaging; final report with metrics and limitations.
-
-### Immediate next steps
-1) Create environment and install dependencies.
-2) Implement `preprocess.py` with VAD/denoise/normalization and tests on 5–10 files.
-3) Implement `features.py` + `features_agg.py`; validate shapes and expected ranges.
-4) Generate subject-wise 5-fold splits; persist in `data/splits/`.
-5) Train RF baseline; target mean accuracy≈85–88% (recall prioritized).
-
-### References (selected)
-- DementiaBank Pitt Corpus: https://dementia.talkbank.org/
-- Sensors (2022): Dementia Detection from Speech Using ML and DL Architectures (reported RF≈87.6%, PRCNN≈85% on compact features).
-
+## Success Criteria
+- ≤2.5 s LCP for `Home.tsx` and ≤3.0 s for secondary routes on 4G.
+- JS bundle reduction ≥30 %, image weight reduction ≥40 % above the fold.
+- No increase in layout shifts or accessibility regressions (axe-core + manual spot checks).
 
