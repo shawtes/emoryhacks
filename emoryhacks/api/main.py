@@ -35,6 +35,7 @@ from src.features_agg import aggregate_all
 from src.preprocess import load_audio, normalize_peak, spectral_denoise
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Header
 from pydantic import BaseModel
 import sys
 # Ensure project root on path
@@ -394,6 +395,86 @@ async def predict_audio_from_url(payload: PredictUrlRequest):
         confidence = "medium"
     else:
         confidence = "low"
+    return PredictionResponse(
+        prediction=prediction,
+        probability=probability,
+        confidence=confidence,
+        message=message,
+    )
+
+
+# Webhook-style endpoint that accepts a downloadable audio URL (e.g., Firebase Storage)
+class AnalyzeWebhookRequest(BaseModel):
+    url: str
+    patientId: Optional[str] = None
+    recordingId: Optional[str] = None
+    secret: Optional[str] = None
+
+
+@app.post("/webhook/analyze", response_model=PredictionResponse)
+async def analyze_webhook(
+    payload: AnalyzeWebhookRequest,
+    x_webhook_secret: Optional[str] = Header(default=None),
+):
+    """
+    Small webhook that takes an audio download URL and returns a prediction.
+    Optionally validates a shared secret via header 'X-Webhook-Secret' or JSON 'secret'.
+    """
+    expected = os.environ.get("WEBHOOK_SECRET", "").strip()
+    provided = (x_webhook_secret or payload.secret or "").strip()
+    if expected and provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    # Reuse predict-url logic
+    try:
+        resp = requests.get(payload.url, timeout=30)
+        resp.raise_for_status()
+        data = resp.content
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to download audio: {e}")
+
+    try:
+        y, sr = librosa.load(io.BytesIO(data), sr=22050)
+        if y.size == 0:
+            raise HTTPException(status_code=400, detail="Downloaded audio contains no data")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Audio decoding failed: {e}")
+
+    feats = extract_realtime_feature_dict(y.astype(np.float64, copy=False), sr)
+    model = _model_cache.get("model")
+    if model is None:
+        prediction = "no_dementia"
+        probability = 0.3
+        message = "Model not loaded - this is a dummy prediction. Please train/load a model."
+    else:
+        try:
+            if hasattr(model, "feature_names"):
+                names = list(getattr(model, "feature_names"))
+                X = vector_from_features(names, feats)
+            else:
+                names = sorted(feats.keys())
+                X = np.asarray([feats[k] for k in names], dtype=np.float32).reshape(1, -1)
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba(X)[0]
+                dementia_prob = float(proba[1] if proba.shape[0] >= 2 else proba[-1])
+            else:
+                dementia_prob = float(model.predict(X)[0])
+            prediction = "dementia" if dementia_prob >= 0.5 else "no_dementia"
+            probability = dementia_prob if prediction == "dementia" else (1.0 - dementia_prob)
+            message = f"Prediction: {prediction.replace('_',' ').title()}. Probability: {probability:.1%}."
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+    prob_diff = abs(probability - 0.5)
+    if prob_diff > 0.3:
+        confidence = "high"
+    elif prob_diff > 0.2:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
     return PredictionResponse(
         prediction=prediction,
         probability=probability,
