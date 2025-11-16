@@ -1,3 +1,22 @@
+.venv/
+.venv311/
+venv/
+**/__pycache__/
+*.pyc
+.DS_Store
+
+# Local data artifacts (not for source control)
+data/raw/**
+data/processed/**
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+
+# Node modules (if any)
+**/node_modules/**
+
 # OS
 .DS_Store
 
