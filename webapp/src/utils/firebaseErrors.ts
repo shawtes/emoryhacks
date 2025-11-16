@@ -22,3 +22,4 @@ export const getFirebaseErrorMessage = (error: unknown, fallback = 'Something we
   return fallback
 }
 
+

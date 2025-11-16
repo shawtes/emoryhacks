@@ -22,6 +22,7 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.6
 shap>=0.45; python_version >= "3.9"
 shap<=0.44.1; python_version < "3.9"
+av>=10.0  # for robust WebM/Opus decoding (PyAV)
 
 # GPU acceleration dependencies (optional, for CUDA-enabled systems)
 # Install CuPy for CUDA 11.x (GTX 1660 Super compatible):

@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 import joblib
 import numpy as np
 import soundfile as sf
+import librosa
 import requests
 import sys as _sys
 try:
@@ -21,7 +22,22 @@ except Exception:
         _sys.modules['numpy._core'] = _np_core  # alias for NumPy 2.x pickles
     except Exception:
         pass
+import sys
+# Ensure project (emoryhacks module) and repo root on path BEFORE local imports
+API_DIR = Path(__file__).resolve()
+PACKAGE_ROOT = API_DIR.parent.parent  # .../emoryhacks
+REPO_ROOT = PACKAGE_ROOT.parent       # repo root
+for path in (str(PACKAGE_ROOT), str(REPO_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 from enhanced_gb_training import AdvancedGradientBoostingClassifier  # noqa: F401
+_main_module = sys.modules.get("__main__")
+if _main_module is not None and not hasattr(_main_module, "AdvancedGradientBoostingClassifier"):
+    setattr(_main_module, "AdvancedGradientBoostingClassifier", AdvancedGradientBoostingClassifier)
+uvicorn_main = sys.modules.get("uvicorn.__main__")
+if uvicorn_main is not None and not hasattr(uvicorn_main, "AdvancedGradientBoostingClassifier"):
+    setattr(uvicorn_main, "AdvancedGradientBoostingClassifier", AdvancedGradientBoostingClassifier)
 from src.features import extract_frame_features, extract_high_level_features
 from src.features_agg import aggregate_all
 from src.preprocess import load_audio, normalize_peak, spectral_denoise
@@ -29,9 +45,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Header
 from pydantic import BaseModel
-import sys
-# Ensure project root on path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    import av  # type: ignore
+except Exception:
+    av = None  # PyAV optional, used for WebM/Opus decoding
 
 from services import (
     DEFAULT_REALTIME_MODEL_PATH,
@@ -112,7 +129,47 @@ def preprocess_audio(audio_bytes: bytes) -> tuple[np.ndarray, int]:
     try:
         audio, sr = sf.read(audio_io, always_2d=False, dtype="float32")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read audio file: {e}")
+        # Fallback to librosa (handles mp3 and many formats via audioread/ffmpeg)
+        try:
+            alt_io = io.BytesIO(audio_bytes)
+            y, sr = librosa.load(alt_io, sr=None, mono=False)
+            audio = y.astype(np.float32)
+        except Exception as e2:
+            # Fallback to PyAV for WebM/Opus and other containers
+            if av is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to read audio file: {e}; librosa fallback failed: {e2}; PyAV not installed",
+                )
+            try:
+                container = av.open(io.BytesIO(audio_bytes))
+                # Pick first audio stream
+                audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+                if audio_stream is None:
+                    raise HTTPException(status_code=400, detail="No audio stream found in file.")
+                # Resample to mono float32 at native rate
+                target_rate = audio_stream.rate or 22050
+                resampler = av.audio.resampler.AudioResampler(format="flt", layout="mono", rate=target_rate)
+                chunks: list[np.ndarray] = []
+                for packet in container.demux(audio_stream):
+                    for frame in packet.decode():
+                        frame = resampler.resample(frame)
+                        # to_ndarray returns shape (channels, samples); with mono → (1, N)
+                        arr = frame.to_ndarray()
+                        if arr.ndim == 2:
+                            arr = arr[0]  # mono
+                        chunks.append(arr.astype(np.float32))
+                if not chunks:
+                    raise HTTPException(status_code=400, detail="No decodable audio frames found.")
+                audio = np.concatenate(chunks, axis=0)
+                sr = int(target_rate)
+            except HTTPException:
+                raise
+            except Exception as e3:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to read audio file: {e}; librosa fallback failed: {e2}; av decode failed: {e3}",
+                )
     
     # Convert to mono if stereo
     if audio.ndim > 1:
@@ -227,6 +284,7 @@ async def predict_audio(file: UploadFile = File(...)):
     Accepts WAV, MP3, or other audio formats supported by soundfile.
     Returns prediction with probability and confidence level.
     """
+    logger.info("Received /predict request content_type=%s filename=%s", file.content_type, getattr(file, "filename", ""))
     # Validate file type
     if not file.content_type or not any(
         t in file.content_type for t in ["audio", "video", "octet-stream"]
@@ -266,10 +324,12 @@ async def predict_audio(file: UploadFile = File(...)):
         prediction = "no_dementia"
         probability = 0.3
         message = "Model not loaded - this is a dummy prediction. Please train a model first."
+        logger.warning("Model cache empty for /predict; returning dummy response")
     else:
         try:
             prediction, prob = predict_with_model(model, features)
             probability = prob if prediction == "dementia" else (1.0 - prob)
+            logger.info("Prediction via /predict label=%s probability=%.3f", prediction, probability)
         except Exception as e:
             logger.error(f"Prediction error: {e}")
             raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
@@ -313,6 +373,7 @@ def _predict_realtime(audio_bytes: bytes) -> Tuple[str, float]:
     classifier = _realtime_classifier
     if classifier is None:
         raise HTTPException(status_code=503, detail="Realtime classifier not available.")
+    logger.info("Running realtime prediction on payload len=%d", len(audio_bytes))
     try:
         realtime_result: Prediction = classifier.predict_from_bytes(audio_bytes, sample_rate=22050)
     except RealtimeClassifierError as exc:
@@ -330,13 +391,34 @@ async def predict_audio_from_url(payload: PredictUrlRequest):
     Uses the advanced/realtime feature path compatible with Enhanced GB model.
     """
     url = payload.url
+    logger.info("Received /predict-url request url=%s", url)
     try:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
+        content_type = resp.headers.get("Content-Type", "")
+        content_length = int(resp.headers.get("Content-Length", "0") or 0)
         audio_bytes = resp.content
+        logger.info(
+            "Downloaded URL content_type=%s content_length=%d bytes_len=%d",
+            content_type, content_length, len(audio_bytes),
+        )
+        # Guard against HTML/error pages or empty payloads
+        if not audio_bytes or len(audio_bytes) < 512:
+            raise HTTPException(status_code=400, detail="Downloaded file is empty or too small to be valid audio.")
+        if content_type and "audio" not in content_type and "octet-stream" not in content_type:
+            # Firebase can return octet-stream; treat non-audio explicit types as error
+            raise HTTPException(status_code=400, detail=f"Downloaded content is not audio (Content-Type: {content_type}).")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to download audio: {e}")
-    prediction, probability = _predict_realtime(audio_bytes)
+    try:
+        prediction, probability = _predict_realtime(audio_bytes)
+    except HTTPException:
+        # Propagate structured errors (e.g., realtime classifier not available)
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error during realtime prediction")
+        raise HTTPException(status_code=500, detail=f"Realtime prediction failed: {e}")
+    logger.info("Realtime prediction complete url=%s label=%s probability=%.3f", url, prediction, probability)
     message = (
         f"Prediction: {prediction.replace('_',' ').title()}. "
         f"Probability: {probability:.1%}. Generated by realtime biomarker model."
@@ -388,6 +470,14 @@ async def analyze_webhook(
         raise HTTPException(status_code=400, detail=f"Failed to download audio: {e}")
 
     prediction, probability = _predict_realtime(audio_bytes)
+    logger.info(
+        "Webhook analysis complete url=%s patientId=%s recordingId=%s label=%s probability=%.3f",
+        payload.url,
+        payload.patientId,
+        payload.recordingId,
+        prediction,
+        probability,
+    )
     prob_diff = abs(probability - 0.5)
     if prob_diff > 0.3:
         confidence = "high"
@@ -411,5 +501,5 @@ async def analyze_webhook(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
 

@@ -58,7 +58,9 @@ export default function AudioRecorder({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+      const mimeTypePreferences = ['audio/mpeg', 'audio/mp3', 'audio/wav']
+      const selectedMimeType = mimeTypePreferences.find((type) => MediaRecorder.isTypeSupported(type))
+      const mediaRecorder = selectedMimeType ? new MediaRecorder(stream, { mimeType: selectedMimeType }) : new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       chunksRef.current = []
       recordingTimeRef.current = 0
@@ -71,9 +73,11 @@ export default function AudioRecorder({
       }
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-        const fileName = `recording-${Date.now()}.webm`
-        const file = new File([blob], fileName, { type: 'audio/webm' })
+        const mimeType = mediaRecorder.mimeType || selectedMimeType || 'audio/wav'
+        const extension = mimeType.includes('mpeg') || mimeType.includes('mp3') ? 'mp3' : 'wav'
+        const blob = new Blob(chunksRef.current, { type: mimeType })
+        const fileName = `recording-${Date.now()}.${extension}`
+        const file = new File([blob], fileName, { type: mimeType })
         const url = URL.createObjectURL(blob)
 
         setAudioBlob(blob)
@@ -135,7 +139,9 @@ export default function AudioRecorder({
 
   const handleSubmit = () => {
     if (audioBlob) {
-      const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: 'audio/webm' })
+      const mimeType = mediaRecorderRef.current?.mimeType || audioBlob.type || 'audio/wav'
+      const extension = mimeType.includes('mpeg') || mimeType.includes('mp3') ? 'mp3' : 'wav'
+      const audioFile = new File([audioBlob], `recording-${Date.now()}.${extension}`, { type: mimeType })
       onRecordingComplete(audioFile)
     }
   }

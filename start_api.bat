@@ -40,11 +40,11 @@ if exist "..\venv\Scripts\activate.bat" (
 
 echo.
 echo Starting FastAPI server...
-echo API will be available at http://localhost:8000
-echo API docs available at http://localhost:8000/docs
+echo API will be available at http://localhost:8001
+echo API docs available at http://localhost:8001/docs
 echo Press Ctrl+C to stop the server
 echo.
 
 REM Start the API server
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8001
 

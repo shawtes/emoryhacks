@@ -28,7 +28,7 @@ pip install -r requirements.txt
 python -m uvicorn api.main:app --reload
 ```
 
-Backend runs at: `http://localhost:8000`
+Backend runs at: `http://localhost:8001`
 
 ### Start Frontend (Terminal 2)
 
@@ -90,6 +90,7 @@ These scripts automatically navigate to the correct directories!
 - See [QUICKSTART.md](./QUICKSTART.md) for detailed setup
 - See [README.md](./README.md) for full documentation
 - See [DEPLOYMENT.md](./DEPLOYMENT.md) for AWS deployment
+
 
 
 

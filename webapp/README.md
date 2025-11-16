@@ -6,13 +6,30 @@ This is a React/TypeScript web application for dementia detection through speech
 
 ## Tech Stack
 
-- **Framework**: React 18.2
-- **Language**: TypeScript 5.0
-- **Build Tool**: Vite 5.4
-- **Routing**: React Router DOM 6.20
-- **HTTP Client**: Axios 1.6
-- **Linting**: ESLint 9 with TypeScript ESLint 8
-- **Styling**: CSS (Single stylesheet approach)
+- **Frontend**
+  - React 18.2 (TypeScript 5)
+  - Vite 5 (dev/build)
+  - React Router 6
+  - Fetch API (tiny wrapper in `src/services/api.ts`)
+  - ESLint 9 + TypeScript ESLint 8
+  - Single stylesheet (`styles.css`)
+
+- **Backend / API (used by this webapp)**
+  - FastAPI (Python)
+  - Uvicorn
+  - CORS middleware
+
+- **ML / Audio stack (used to generate analyses shown in the app)**
+  - NumPy, SciPy, pandas
+  - scikit-learn (Gradient Boosting, Random Forest, Ensembles)
+  - librosa (audio loading/features)
+  - PyAV + FFmpeg (robust WebM/Opus decoding)
+  - joblib (model artifacts)
+  - SHAP (model explainability)
+
+- **Data & Ops**
+  - Firebase (Auth, Functions, Storage)
+  - GitHub-friendly artifacts under `reports/` (metrics JSON + PNGs)
 
 ## Project Structure
 
@@ -20,7 +37,6 @@ This is a React/TypeScript web application for dementia detection through speech
 webapp/
 ├── src/
 │   ├── components/          # Reusable UI components
-│   │   ├── AudioRecorder.tsx    # Audio recording component
 │   │   ├── FileUploader.tsx     # File upload with drag-and-drop
 │   │   ├── PatientForm.tsx      # Patient information form
 │   │   ├── ProtectedRoute.tsx   # Route protection wrapper
@@ -50,7 +66,7 @@ webapp/
 ### Component-Based Architecture
 
 - **Pages**: Top-level route components (`Home`, `Login`, `Signup`, `Assessment`)
-- **Components**: Reusable UI components (`AudioRecorder`, `FileUploader`, etc.)
+- **Components**: Reusable UI components (`FileUploader`, etc.)
 - **Single Responsibility**: Each component has a focused purpose
 
 ### Routing
@@ -98,19 +114,11 @@ Main workflow component managing the multi-step assessment:
 - `result`: ML prediction results
 - `sessions`: Assessment history
 
-### Audio Recorder (`components/AudioRecorder.tsx`)
-
-Handles browser audio recording:
-- Uses `MediaRecorder` API
-- Records audio from microphone
-- Provides preview and reset functionality
-- Converts to File for API submission
-
 ### File Uploader (`components/FileUploader.tsx`)
 
 File upload component:
 - Drag-and-drop support
-- File validation (audio formats)
+- MP3/WAV validation (prefers MP3)
 - File preview with metadata
 - Remove file functionality
 
@@ -129,7 +137,7 @@ Visualizes ML prediction results:
 
 API URL configured via environment variable:
 ```typescript
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001'
 ```
 
 ### Endpoints
@@ -143,6 +151,33 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 - Network errors caught and displayed to user
 - Loading states during API calls
 - Error messages shown in UI
+
+## Reports and Analytics
+
+This project includes pre-computed metrics and visualizations produced by the ML pipeline. They are committed under `reports/` so you can explore model quality without re-running training.
+
+- Where to look:
+  - `reports/metrics/ensemble/ensemble_cv_metrics.json`: cross-validated metrics for the ensemble
+  - `reports/metrics/rf/rf_cv_metrics.json`: cross-validated metrics for the Random Forest baseline
+  - `reports/visualizations/enhanced_gb_analysis.png`: performance overview for the enhanced GB model
+  - `reports/visualizations/feature_category_analysis.png`: feature group importance/impact
+  - `reports/technical_report.md`: narrative describing dataset, features, models, and results
+
+- Typical metrics included (varies by file):
+  - Accuracy, Precision, Recall (Sensitivity), F1
+  - ROC-AUC / PR-AUC
+  - Per-fold results and mean ± std across folds
+  - Class distribution, confusion matrix summaries
+
+- How to view:
+  - Open PNGs in `reports/visualizations/` directly in your file viewer
+  - Open JSON in your editor to inspect per-fold metrics
+  - Read `reports/technical_report.md` for methodology and findings
+
+- How this ties to the app:
+  - The webapp uses the trained artifact (`enhanced_gb_combined_features.joblib`) served by the FastAPI backend
+  - The model/feature choices reflected in reports match what the API uses for inference
+  - Future enhancement: surface selective report snippets (e.g., high-level metrics, last training timestamp) inside a clinician dashboard page
 
 ## Development
 
@@ -174,13 +209,13 @@ npm run lint
 
 - Runs on `http://localhost:3000`
 - Hot Module Replacement (HMR) enabled
-- API proxy configured for `/api` → `http://localhost:8000`
+- API proxy configured for `/api` → `http://localhost:8001`
 
 ### Environment Variables
 
 Create `.env` file:
 ```
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=http://localhost:8001
 ```
 
 ## Build Process
@@ -225,7 +260,6 @@ VITE_API_URL=http://localhost:8000
 
 - Modern browsers (Chrome, Firefox, Safari, Edge)
 - ES2020+ features
-- MediaRecorder API (for audio recording)
 - File API (for file uploads)
 
 ## Performance Considerations

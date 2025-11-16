@@ -92,7 +92,7 @@ python comprehensive_analysis.py
 ┌───────────────────────▼─────────────────────────────────────┐
 │                      API LAYER                               │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │  FastAPI Backend (Port 8000)                         │   │
+│  │  FastAPI Backend (Port 8001)                         │   │
 │  │  • POST /predict - Audio analysis endpoint           │   │
 │  │  • GET /health - Health check                        │   │
 │  │  • GET / - API info                                  │   │
@@ -399,7 +399,7 @@ API information.
 
 ### Test API with cURL
 ```bash
-curl -X POST http://localhost:8000/predict \
+curl -X POST http://localhost:8001/predict \
   -F "file=@path/to/audio.wav"
 ```
 
@@ -427,7 +427,7 @@ docker build -t dementia-api .
 docker build -t dementia-frontend ./webapp
 
 # Run
-docker run -p 8000:8000 dementia-api
+docker run -p 8001:8001 dementia-api
 docker run -p 3000:80 dementia-frontend
 ```
 
@@ -444,7 +444,7 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
 - `MODEL_PATH` - Optional: custom model path
 
 **Frontend:**
-- `VITE_API_URL` - Backend API URL (default: `http://localhost:8000`)
+- `VITE_API_URL` - Backend API URL (default: `http://localhost:8001`)
 
 ### Model Setup
 1. Train models using `emoryhacks/src/run_training.py`
@@ -570,6 +570,7 @@ Research use only - See project license file.
 - [React Docs](https://react.dev/)
 - [AWS Elastic Beanstalk](https://aws.amazon.com/elasticbeanstalk/)
 - [Docker Docs](https://docs.docker.com/)
+
 
 
 

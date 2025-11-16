@@ -1,82 +1,99 @@
 import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { getPrefetchEvents } from '../routes/lazyPages'
 
 const stackSections = [
   {
-    title: 'Intro to VoiceVital',
-    status: 'Pitch-ready',
+    title: 'Frontend',
+    status: 'In use',
     description:
-      'VoiceVital turns natural speech into objective biomarkers for dementia screening, bridging patients, caregivers, and clinicians.',
+      'React + TypeScript app built with Vite, React Router, and a single stylesheet.',
     bullets: [
-      'Voice-first UX keeps visits human.',
-      'Dual portals for patients and clinics share the same AI signal.',
-      'Research-grade reports make reimbursement and approvals simple.',
+      'React 18, TypeScript 5, Vite 5',
+      'Client API in src/services/api.ts (fetch-based)',
+      'ESLint 9 + TypeScript ESLint 8',
     ],
   },
   {
-    title: 'Frontend stack',
-    status: 'Complete',
+    title: 'Backend / API',
+    status: 'In use',
     description:
-      'React + Vite + custom design system, with Framer Motion-ready components, lazy-loaded hero media, and accessibility baked in.',
+      'FastAPI service exposes /predict and /predict-url endpoints for audio analysis.',
     bullets: [
-      'Reusable hero, insights ribbon, and carousel components.',
-      'Custom hooks for reduced motion + scroll-triggered reveals.',
-      'Glassmorphism tokens, sticky judge-mode shortcuts, and CTA micro-interactions.',
+      'FastAPI + Uvicorn',
+      'CORS middleware enabled',
+      'Procfile/start scripts for local/dev',
     ],
   },
   {
-    title: 'Backend & models',
-    status: 'Training in progress',
+    title: 'ML & Audio',
+    status: 'In use',
     description:
-      'FastAPI services orchestrate data ingestion, with DL acoustic + transformer language models training on de-identified corpora.',
+      'Classical ML with engineered features; robust audio IO/decoding for WAV/MP3/WebM.',
     bullets: [
-      'Mock endpoints keep the demo responsive while models train.',
-      'Pipeline supports continual fine-tuning + A/B of inference endpoints.',
-      'Audit logging + PHI redaction modules queued for next sprint.',
+      'scikit-learn (Gradient Boosting, RF, ensembles), joblib artifacts',
+      'librosa (features, loading) + soundfile',
+      'PyAV + FFmpeg (WebM/Opus decode fallback)',
+      'SHAP (explainability)',
     ],
   },
   {
-    title: 'Deployment pipeline',
-    status: 'AWS ready',
+    title: 'Data & Ops',
+    status: 'In use',
     description:
-      'CI/CD pushes the frontend to S3 + CloudFront and the backend/models to ECS Fargate with automated health checks.',
+      'Firebase for patient/doctor flows and audio storage; reports versioned in-repo.',
     bullets: [
-      'GitHub Actions handle lint → test → build → deploy per branch.',
-      'Parameter Store + Secrets Manager control runtime credentials.',
-      'CloudWatch dashboards monitor latency, queue depth, and GPU utilization.',
+      'Firebase Auth, Functions, Storage',
+      'Artifacts and reports committed under reports/',
+      'Emulator-ready functions in functions/',
     ],
   },
 ]
 
-const complianceStatus = [
-  {
-    name: 'HIPAA-ready',
-    complete: ['TLS everywhere', 'Role-based access', 'Audit logging scaffold'],
-    todo: ['Execute BAA', 'Independent HIPAA assessment'],
-  },
-  {
-    name: 'WCAG 2.1 AA',
-    complete: ['High-contrast palette', 'Keyboard navigation', 'Reduced-motion support'],
-    todo: ['Manual screen reader audit'],
-  },
-  {
-    name: 'SOC 2 roadmap',
-    complete: ['Infrastructure as code', 'Secrets rotation plan'],
-    todo: ['Policy documentation', '3rd-party audit scheduling'],
-  },
-]
+// (Compliance checklist section removed to streamline the page)
 
 export default function TechStack() {
+  const [reportSummary, setReportSummary] = useState<string>('Loading technical report summary…')
+
+  useEffect(() => {
+    let isMounted = true
+    const summarize = (md: string) => {
+      // Basic summarization: prefer first heading + following 8-10 lines, otherwise first ~1200 chars
+      const lines = md.split(/\r?\n/)
+      const firstHeaderIdx = lines.findIndex((l) => /^#|^==|^##/.test(l.trim()))
+      let snippet = ''
+      if (firstHeaderIdx !== -1) {
+        const slice = lines.slice(firstHeaderIdx, firstHeaderIdx + 14)
+        snippet = slice.join('\n').trim()
+      } else {
+        snippet = md.slice(0, 1200).trim()
+      }
+      // Remove excessive markdown symbols for inline viewing
+      snippet = snippet.replace(/^#{1,6}\s+/gm, '')
+      return snippet
+    }
+    fetch('/reports/technical_report.md')
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((text) => {
+        if (!isMounted) return
+        setReportSummary(summarize(text))
+      })
+      .catch(() => {
+        if (!isMounted) return
+        setReportSummary('Unable to load technical report. Please open /reports/technical_report.md directly.')
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   return (
     <div className="techstack-page">
       <header className="techstack-hero">
         <div>
-          <p className="techstack-kicker">VoiceVital architecture poster</p>
-          <h1>Everything judges need before the live demo</h1>
-          <p>
-            This page is the launchpad for the hackathon walkthrough. Review the stack, jump into the patient or doctor
-            flows, or explore compliance progress in one click.
-          </p>
+          <p className="techstack-kicker">VoiceVital – System overview</p>
+          <h1>Tech stack and model reports</h1>
+          <p>Overview of the running stack and links to the latest model metrics/visuals in this repo.</p>
         </div>
         <div className="techstack-hero-actions">
           <Link to="/patient/signup" className="btn-primary" {...getPrefetchEvents('PatientSignup')}>
@@ -107,33 +124,53 @@ export default function TechStack() {
 
       <section className="compliance-section">
         <div className="compliance-header">
-          <h2>Compliance & readiness badges</h2>
-          <p>Transparent checklist of what’s done and what remains before full production launch.</p>
+          <h2>Reports & analytics</h2>
+          <p>Key visualizations and a brief summary from the technical report.</p>
         </div>
         <div className="compliance-grid">
-          {complianceStatus.map((item) => (
-            <article key={item.name} className="compliance-card">
-              <h3>{item.name}</h3>
-              <div className="compliance-lists">
-                <div>
-                  <p className="compliance-label">✅ Completed</p>
-                  <ul>
-                    {item.complete.map((task) => (
-                      <li key={task}>{task}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <p className="compliance-label">🔶 Next steps</p>
-                  <ul>
-                    {item.todo.map((task) => (
-                      <li key={task}>{task}</li>
-                    ))}
-                  </ul>
-                </div>
+          <article className="compliance-card">
+            <h3>Visualizations</h3>
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              <div>
+                <p><strong>Enhanced GB analysis</strong></p>
+                <a href="/reports/visualizations/enhanced_gb_analysis.png" target="_blank" rel="noreferrer">
+                  <img
+                    src="/reports/visualizations/enhanced_gb_analysis.png"
+                    alt="Enhanced Gradient Boosting analysis"
+                    style={{ maxWidth: '100%', border: '1px solid #ddd', borderRadius: 6 }}
+                  />
+                </a>
               </div>
-            </article>
-          ))}
+              <div>
+                <p><strong>Feature category analysis</strong></p>
+                <a href="/reports/visualizations/feature_category_analysis.png" target="_blank" rel="noreferrer">
+                  <img
+                    src="/reports/visualizations/feature_category_analysis.png"
+                    alt="Feature category analysis"
+                    style={{ maxWidth: '100%', border: '1px solid #ddd', borderRadius: 6 }}
+                  />
+                </a>
+              </div>
+            </div>
+          </article>
+          <article className="compliance-card">
+            <h3>Technical report (summary)</h3>
+            <div style={{ whiteSpace: 'pre-wrap' }}>
+              {reportSummary}
+            </div>
+            <p style={{ marginTop: '0.75rem' }}>
+              <a href="/reports/technical_report.md" target="_blank" rel="noreferrer" className="btn-secondary">
+                View full technical report
+              </a>
+            </p>
+          </article>
+          <article className="compliance-card">
+            <h3>Metrics JSON</h3>
+            <ul>
+              <li><a href="/reports/metrics/ensemble/ensemble_cv_metrics.json" target="_blank" rel="noreferrer">Ensemble CV metrics</a></li>
+              <li><a href="/reports/metrics/rf/rf_cv_metrics.json" target="_blank" rel="noreferrer">Random Forest CV metrics</a></li>
+            </ul>
+          </article>
         </div>
       </section>
 

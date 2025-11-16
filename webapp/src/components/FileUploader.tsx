@@ -39,8 +39,10 @@ export default function FileUploader({ onFileSelect, disabled }: FileUploaderPro
 
   const handleFile = (file: File) => {
     // Validate file type
-    if (!file.type.startsWith('audio/') && !file.name.match(/\.(wav|mp3|m4a|webm|ogg)$/i)) {
-      alert('Please select an audio file (WAV, MP3, M4A, WebM, or OGG)')
+    const isAudio = file.type.startsWith('audio/')
+    const isAllowedExt = /\.(mp3|wav|m4a)$/i.test(file.name)
+    if (!(isAudio && isAllowedExt)) {
+      alert('Please select an MP3 (preferred), WAV, or M4A file.')
       return
     }
 
@@ -72,7 +74,7 @@ export default function FileUploader({ onFileSelect, disabled }: FileUploaderPro
         <input
           ref={fileInputRef}
           type="file"
-          accept="audio/*"
+          accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/m4a"
           onChange={handleChange}
           disabled={disabled}
           style={{ display: 'none' }}

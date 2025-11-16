@@ -27,3 +27,4 @@
 - Staying within emulators for most dev/testing keeps usage near zero until you present the demo.
 - Remember Blaze plan requires attaching a billing method even if the calculated spend rounds to $0.
 
+

@@ -4,7 +4,7 @@ import LiveStatusBadge from '../components/LiveStatusBadge'
 import useStaggeredReveal from '../hooks/useStaggeredReveal'
 import { useFirebase } from '../context/FirebaseContext'
 import { useAuth } from '../context/AuthContext'
-import AudioRecorder, { type AudioReadyPayload } from '../components/AudioRecorder'
+import FileUploader from '../components/FileUploader'
 import { uploadPatientRecording, type UploadPatientRecordingResult } from '../services/audioUpload'
 import { getFirebaseErrorMessage } from '../utils/firebaseErrors'
 import { getAssessmentScript } from '../content/audioScripts'
@@ -42,16 +42,21 @@ interface ClinicDocData {
   contactEmail?: string
 }
 
-type UploadStage = 'idle' | 'recording' | 'uploading' | 'saving' | 'success' | 'error'
+type UploadStage = 'idle' | 'uploading' | 'saving' | 'success' | 'error'
 
 export default function PatientAssessment() {
   const { selectPersona } = useFirebase()
   const { user, persona, claims } = useAuth()
+  const log = (...args: unknown[]) => {
+    // eslint-disable-next-line no-console -- intentional demo logging
+    console.log('[PatientAssessment]', ...args)
+  }
   const [patientDoc, setPatientDoc] = useState<PatientDocData | null>(null)
   const [doctorDoc, setDoctorDoc] = useState<DoctorDocData | null>(null)
   const [clinicDoc, setClinicDoc] = useState<ClinicDocData | null>(null)
   const [recordings, setRecordings] = useState<RecordingHistory[]>([])
-  const [audioPreview, setAudioPreview] = useState<AudioReadyPayload | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null)
   const [notesInput, setNotesInput] = useState('')
   const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
   const [uploadStatusMessage, setUploadStatusMessage] = useState<string | null>(null)
@@ -67,6 +72,7 @@ export default function PatientAssessment() {
 
   useEffect(() => {
     if (persona !== 'patient') {
+      log('Persona mismatch, switching to patient persona', persona)
       void selectPersona('patient')
     }
   }, [persona, selectPersona])
@@ -78,6 +84,7 @@ export default function PatientAssessment() {
     const db = getFirestore(getFirebaseApp('patient'))
     const patientRef = doc(db, 'patients', patientIdClaim)
     const unsubscribe = onSnapshot(patientRef, (snap) => {
+      log('Received patient document snapshot', snap.exists())
       setPatientDoc(snap.exists() ? (snap.data() as PatientDocData) : null)
     })
     return () => unsubscribe()
@@ -125,6 +132,7 @@ export default function PatientAssessment() {
     const recordingsRef = collection(db, 'patientAudio', patientIdClaim, 'recordings')
     const recordingsQuery = query(recordingsRef, orderBy('recordedAt', 'desc'), limit(5))
     const unsubscribe = onSnapshot(recordingsQuery, (snapshot) => {
+      log('Fetched recent recordings', snapshot.size)
       const mapped = snapshot.docs.map((docSnap) => {
         const data = docSnap.data()
         return {
@@ -139,52 +147,79 @@ export default function PatientAssessment() {
     return () => unsubscribe()
   }, [patientIdClaim, persona])
 
-  const handleRecorderReady = (payload: AudioReadyPayload) => {
-    setAudioPreview(payload)
-    setUploadStage('recording')
-    setUploadStatusMessage(null)
+  const handleFileSelect = (file: File) => {
+    log('File selected', { size: file.size, type: file.type, name: file.name })
+    // Only allow audio, prefer mp3
+    if (!file.type.startsWith('audio/') && !file.name.match(/\.mp3$/i)) {
+      setUploadError('Please select an MP3 or audio file.')
+      return
+    }
     setUploadError(null)
+    setSelectedFile(file)
+    if (selectedFileUrl) {
+      URL.revokeObjectURL(selectedFileUrl)
+    }
+    setSelectedFileUrl(URL.createObjectURL(file))
+    setUploadStatusMessage(null)
   }
 
   const handleUpload = async () => {
-    if (!audioPreview) {
-      setUploadError('Please record audio before submitting.')
+    if (!selectedFile) {
+      log('Upload blocked: no file selected')
+      setUploadError('Please choose an MP3 file before submitting.')
       return
     }
+    log('Beginning upload', { size: selectedFile.size, patientIdClaim })
     setPredictionResult(null)
     setUploadStage('uploading')
     setUploadProgress(0)
-    setUploadStatusMessage('Uploading audio to Firebase…')
+    setUploadStatusMessage('Uploading MP3 to Firebase…')
     setUploadError(null)
     try {
       const res: UploadPatientRecordingResult = await uploadPatientRecording({
-        file: audioPreview.file,
+        file: selectedFile,
         patientId: patientIdClaim,
         doctorId: patientDoc?.doctorId ?? null,
         notes: notesInput || null,
-        durationSeconds: audioPreview.durationSeconds,
-        onProgress: (percentage) => setUploadProgress(percentage),
+        durationSeconds: undefined,
+        onProgress: (percentage) => {
+          log('Upload progress', percentage)
+          setUploadProgress(percentage)
+        },
       })
+      log('Upload complete', res)
       setLastRecordingId(res.recordingId)
       setUploadStage('success')
-      setUploadStatusMessage('Submitted successfully to Firebase and shared with your doctor.')
+      setUploadStatusMessage('Uploaded to Firebase and shared with your doctor. Starting analysis…')
       setNotesInput('')
 
       // Analyze via backend using Firebase download URL
       setAnalyzing(true)
-      const storage = getStorage(getFirebaseApp('patient'))
-      const url = await getDownloadURL(ref(storage, res.storagePath))
-      const result = await predictByUrl(url)
-      setPredictionResult(result)
-      setAnalyzing(false)
-      setUploadStatusMessage('Analysis complete.')
+      try {
+        const storage = getStorage(getFirebaseApp('patient'))
+        const url = await getDownloadURL(ref(storage, res.storagePath))
+        log('Fetched storage download URL', url)
+        const result = await predictByUrl(url)
+        log('Prediction result received', result)
+        setPredictionResult(result)
+        setUploadStatusMessage('Analysis complete.')
+      } catch (analysisError) {
+        log('Analysis error', analysisError)
+        setUploadStatusMessage('Upload complete, but analysis failed.')
+        const msg = analysisError instanceof Error ? analysisError.message : 'Unknown analysis error'
+        setUploadError(`Analysis error: ${msg}`)
+      } finally {
+        setAnalyzing(false)
+      }
     } catch (error) {
+      log('Upload or analysis error', error)
       setUploadStage('error')
       const message = getFirebaseErrorMessage(error)
-      setUploadError(`Not submitted. ${message}`)
-      setUploadStatusMessage('There was a problem submitting to Firebase.')
+      setUploadError(`Upload failed. ${message}`)
+      setUploadStatusMessage('There was a problem uploading to Firebase.')
     } finally {
       setUploadProgress(null)
+      log('Upload flow finished')
       // Keep preview and messages visible so user can see results
     }
   }
@@ -227,20 +262,15 @@ export default function PatientAssessment() {
       </section>
 
       <section className="guided-controls-card" data-animate>
-        <div className="script-card-eyebrow">Recorder</div>
-        <AudioRecorder
-          onRecordingComplete={() => undefined}
-          onAudioReady={handleRecorderReady}
-          showAnalyzeButton={false}
-          autoSubmit={false}
-        />
-        {audioPreview && (
+        <div className="script-card-eyebrow">Upload MP3</div>
+        <FileUploader onFileSelect={handleFileSelect} />
+        {selectedFile && (
           <div className="audio-review-card">
             <div className="audio-review-head">
               <strong>Preview</strong>
-              <span>{audioPreview.durationSeconds ?? 0}s</span>
+              <span>{Math.round((selectedFile.size / (16000 * 2)) || 0)}s</span>
             </div>
-            <audio controls src={audioPreview.url} className="audio-player" />
+            {selectedFileUrl && <audio controls src={selectedFileUrl} className="audio-player" />}
             <label className="form-field">
               <span>Notes for your doctor (optional)</span>
               <textarea

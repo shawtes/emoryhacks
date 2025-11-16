@@ -32,7 +32,7 @@ pip install -r requirements.txt
 python -m uvicorn api.main:app --reload
 ```
 
-Backend will run at `http://localhost:8000`
+Backend will run at `http://localhost:8001`
 
 ### Step 2: Frontend Setup (New Terminal)
 
@@ -61,7 +61,7 @@ Frontend will run at `http://localhost:3000`
 # Build and start everything
 docker-compose up --build
 
-# Backend: http://localhost:8000
+# Backend: http://localhost:8001
 # Frontend: http://localhost:3000
 ```
 
@@ -92,7 +92,7 @@ chmod +x start_frontend.sh
 Test the API directly:
 
 ```bash
-curl -X POST http://localhost:8000/predict \
+curl -X POST http://localhost:8001/predict \
   -F "file=@path/to/your/audio.wav"
 ```
 
@@ -112,7 +112,7 @@ Place trained models in `emoryhacks/models/` directory.
 ### Backend won't start
 - Check Python version: `python --version` (need 3.11+)
 - Make sure virtual environment is activated
-- Check if port 8000 is already in use
+- Check if port 8001 is already in use
 
 ### Frontend won't start
 - Check Node version: `node --version` (need 18+)
@@ -120,7 +120,7 @@ Place trained models in `emoryhacks/models/` directory.
 - Check if port 3000 is already in use
 
 ### API connection errors
-- Make sure backend is running on port 8000
+- Make sure backend is running on port 8001
 - Check `webapp/.env` file has correct `VITE_API_URL`
 
 ### Model not found warnings
@@ -139,7 +139,7 @@ Place trained models in `emoryhacks/models/` directory.
 
 - Check `DEPLOYMENT.md` for detailed deployment instructions
 - Check `README_DEPLOYMENT.md` for architecture overview
-- Review API docs at `http://localhost:8000/docs` (when backend is running)
+- Review API docs at `http://localhost:8001/docs` (when backend is running)
 
 ## Important Notes
 
@@ -148,6 +148,7 @@ Place trained models in `emoryhacks/models/` directory.
 🔒 **Privacy**: Audio files are processed in memory and not stored permanently.
 
 📊 **Models**: You need trained models in `emoryhacks/models/` for real predictions.
+
 
 
 

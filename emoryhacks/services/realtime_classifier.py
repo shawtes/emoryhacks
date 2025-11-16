@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover
         pass
 
 import librosa
+import tempfile
 
 from advanced_features_extractor import (
     extract_advanced_spectral_features,
@@ -109,6 +110,29 @@ class Prediction:
     probability: float
 
 
+def _load_audio_from_bytes(audio_bytes: bytes, sample_rate: int) -> Tuple[np.ndarray, int]:
+    try:
+        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=sample_rate)
+        if y.size == 0:
+            raise ValueError("Audio contains no data.")
+        return y, sr
+    except Exception:
+        tmp = tempfile.NamedTemporaryFile(suffix=".webm", delete=False)
+        try:
+            tmp.write(audio_bytes)
+            tmp.flush()
+            tmp.close()
+            y, sr = librosa.load(tmp.name, sr=sample_rate)
+            if y.size == 0:
+                raise ValueError("Audio contains no data.")
+            return y, sr
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+
 class RealtimeClassifier:
     """Reusable helper to run the enhanced GB realtime pipeline."""
 
@@ -139,11 +163,9 @@ class RealtimeClassifier:
 
     def predict_from_bytes(self, audio_bytes: bytes, sample_rate: int = 22050) -> Prediction:
         try:
-            y, sr = librosa.load(io.BytesIO(audio_bytes), sr=sample_rate)
+            y, sr = _load_audio_from_bytes(audio_bytes, sample_rate)
         except Exception as exc:
             raise RealtimeClassifierError(f"Audio decoding failed: {exc}") from exc
-        if y.size == 0:
-            raise RealtimeClassifierError("Audio contains no data.")
         return self.predict_from_array(y, sr)
 
 
